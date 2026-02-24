@@ -13,6 +13,7 @@ import path from 'path'       // 👈 Добавляем для работы с 
 import { fileURLToPath } from 'url'  // 👈 Добавляем для ES modules
 import axios from 'axios'  // 👈 Обязательно добавить!
 import cron from 'node-cron'  // 👈 Проверь, что так
+import socialsConfig from './config/social.js'
 
 // =============================================
 // КОНФИГУРАЦИЯ
@@ -30,7 +31,7 @@ const config = {
 	//Настройки
 	checkInterval: process.env.CHECK_INTERVAL || '1',
 	name: 'Reizuz Stream Bot',
-	version: '0.0.2'
+	version: '0.0.3'
 }
 
 // =============================================
@@ -462,7 +463,8 @@ async function checkStreamAndAnnounce(bot) {
 
 		// Стрим закончился
 		if (changes.event === 'stream_ended') {
-			console.log('📴 Стрим закончился')
+		if (socialsConfig.events?.streamEnd === true) {
+				console.log('📴 Стрим закончился')
 			const endText = createStreamEndText()
 
 			await bot.telegram.sendMessage(
@@ -474,12 +476,18 @@ async function checkStreamAndAnnounce(bot) {
 				}
 			)
 			console.log('📴 Сообщение об окончании отправлено')
+			}
+			
 		}
 
 		// Стрим обновился (изменилось название)
 		if (changes.event === 'stream_updated') {
-			console.log(`📝 Название стрима изменилось на: "${changes.streamInfo.title}"`)
+
+		if (socialsConfig.events?.streamUpdate === true) {
+						console.log(`📝 Название стрима изменилось на: "${changes.streamInfo.title}"`)
 			// Можно добавить оповещение об изменении, если нужно
+		}
+
 		}
 
 	} catch (error) {
