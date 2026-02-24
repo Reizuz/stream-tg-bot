@@ -78,7 +78,8 @@ function createAnnouncementText(streamInfo) {
 *${streamInfo.title}*
 
 ${gameText}${viewersText}
-Заваривайте чай и залетайте! 👇
+Заваривайте чай и залетайте! 👇\n
+Разработано @reizuzstream с ❤️
     `.trim()
 }
 
@@ -90,6 +91,8 @@ function createStreamEndText() {
 📴 *СТРИМ ЗАКОНЧИЛСЯ*
 
 Спасибо всем, кто был! Записи появятся на YouTube.${socialBlock}
+\n
+Разработано @reizuzstream с ❤️
     `.trim()
 }
 
