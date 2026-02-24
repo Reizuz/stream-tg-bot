@@ -31,7 +31,7 @@ const config = {
 	//Настройки
 	checkInterval: process.env.CHECK_INTERVAL || '1',
 	name: 'Reizuz Stream Bot',
-	version: '0.0.3'
+	version: '0.1.3'
 }
 
 // =============================================
@@ -422,12 +422,19 @@ async function checkStreamAndAnnounce(bot) {
 
 			// Проверяем наличие оптимизированной картинки
 			if (imageService.hasImage()) {
+				const image = await imageService.getStreamImage(changes.streamInfo.gameName)
 				console.log('🖼 Отправляем анонс с оптимизированной картинкой')
+				console.log('🖋 Тип image:', typeof image)
+				console.log('🖋 Содержимое:', Object.keys(image || {}))
+
+				if (!image) {
+					throw new Error('Не удалось получить картинку')
+				}
 
 				try {
 					await bot.telegram.sendPhoto(
 						config.channelId,
-						imageService.getImage(), // Используем getImage() вместо getInputFile()
+						image,  // 👈 ИСПОЛЬЗУЕМ СОХРАНЕННУЮ ПЕРЕМЕННУЮ!
 						{
 							caption: announcementText,
 							parse_mode: 'Markdown',
@@ -466,30 +473,30 @@ async function checkStreamAndAnnounce(bot) {
 
 		// Стрим закончился
 		if (changes.event === 'stream_ended') {
-		if (socialsConfig.events?.streamEnd === true) {
+			if (socialsConfig.events?.streamEnd === true) {
 				console.log('📴 Стрим закончился')
-			const endText = createStreamEndText()
+				const endText = createStreamEndText()
 
-			await bot.telegram.sendMessage(
-				config.channelId,
-				endText,
-				{
-					parse_mode: 'Markdown',
-					reply_markup: keyboard?.reply_markup
-				}
-			)
-			console.log('📴 Сообщение об окончании отправлено')
+				await bot.telegram.sendMessage(
+					config.channelId,
+					endText,
+					{
+						parse_mode: 'Markdown',
+						reply_markup: keyboard?.reply_markup
+					}
+				)
+				console.log('📴 Сообщение об окончании отправлено')
 			}
-			
+
 		}
 
 		// Стрим обновился (изменилось название)
 		if (changes.event === 'stream_updated') {
 
-		if (socialsConfig.events?.streamUpdate === true) {
-						console.log(`📝 Название стрима изменилось на: "${changes.streamInfo.title}"`)
-			// Можно добавить оповещение об изменении, если нужно
-		}
+			if (socialsConfig.events?.streamUpdate === true) {
+				console.log(`📝 Название стрима изменилось на: "${changes.streamInfo.title}"`)
+				// Можно добавить оповещение об изменении, если нужно
+			}
 
 		}
 
@@ -523,15 +530,15 @@ async function startBot() {
 
 		// Проверяем Twitch
 		console.log(`📺 Twitch: @${config.twitchUsername}`)
-		
+
 		// Выполняем первичную проверку Twitch API
 		console.log('🔄 Выполняю первичную проверку Twitch API...')
 		try {
 			const liveStream = await twitchService.checkStream()
-			
+
 			if (liveStream && liveStream.isLive) {
 				console.log(`🔴 СТРИМ В ЭФИРЕ! Название: ${liveStream.title}`)
-				
+
 				// Обновляем состояние в файле
 				twitchService.state.isLive = true
 				twitchService.state.lastStreamId = liveStream.id
@@ -540,11 +547,11 @@ async function startBot() {
 				twitchService.state.streamStartedAt = liveStream.startedAt
 				twitchService.state.lastChecked = new Date().toISOString()
 				twitchService.saveState()
-				
+
 				console.log('✅ Состояние обновлено (ONLINE)')
 			} else {
 				console.log('⭕ Стрим не в эфире')
-				
+
 				// Обновляем состояние в файле
 				twitchService.state.isLive = false
 				twitchService.state.lastChecked = new Date().toISOString()
@@ -553,7 +560,7 @@ async function startBot() {
 		} catch (error) {
 			console.error('❌ Ошибка при первичной проверке:', error.message)
 		}
-		
+
 		// Показываем финальное состояние
 		const finalStatus = twitchService.getStatus()
 		console.log(`📊 Финальный статус: ${finalStatus.isLive ? '🔴 ONLINE' : '⭕ OFFLINE'}`)
@@ -580,35 +587,35 @@ async function startBot() {
 			const timeoutPromise = new Promise((_, reject) => {
 				setTimeout(() => reject(new Error('Таймаут запуска бота (10с)')), 10000)
 			})
-			
+
 			await Promise.race([launchPromise, timeoutPromise])
-			
+
 			console.log('✅ Бот успешно запущен!')
 			console.log(`📢 Канал: ${config.channelId}`)
-			
+
 		} catch (launchError) {
 			console.error('❌ Ошибка запуска бота:', launchError.message)
 			console.log('🔄 Пробую альтернативный способ запуска...')
-			
+
 			// Альтернативный способ запуска
 			try {
 				const me = await bot.telegram.getMe()
 				console.log(`✅ Соединение с Telegram есть (бот: @${me.username})`)
-				
+
 				// Запускаем без ожидания
 				bot.launch().catch(e => {
 					console.error('❌ Фоновая ошибка:', e.message)
 				})
-				
+
 				console.log('✅ Бот запущен в фоновом режиме')
 				console.log(`📢 Канал: ${config.channelId}`)
-				
+
 			} catch (altError) {
 				console.error('❌ Альтернативный запуск тоже не работает:', altError.message)
 				throw altError
 			}
 		}
-		
+
 		// =========================================
 		// ЗАПУСК ПЕРИОДИЧЕСКИХ ПРОВЕРОК
 		// =========================================
@@ -618,7 +625,7 @@ async function startBot() {
 		function startPeriodicChecks(bot) {
 			// Получаем интервал из конфига
 			let intervalMinutes = 5; // по умолчанию 5 минут
-			
+
 			if (config.checkInterval) {
 				const parsed = parseInt(config.checkInterval);
 				if (!isNaN(parsed) && parsed > 0) {
@@ -630,10 +637,10 @@ async function startBot() {
 			} else {
 				console.log('⚠️ CHECK_INTERVAL не задан, использую 5 мин');
 			}
-			
+
 			const intervalMs = intervalMinutes * 60 * 1000;
 			console.log(`⏰ Будет проверять каждые ${intervalMinutes} мин (${intervalMs} мс)`);
-			
+
 			// Первая проверка через 10 секунд
 			setTimeout(() => {
 				console.log('🔄 Первая автоматическая проверка...');
@@ -641,7 +648,7 @@ async function startBot() {
 					console.error('❌ Ошибка в первой проверке:', err.message);
 				});
 			}, 10000);
-			
+
 			// Периодические проверки
 			setInterval(() => {
 				console.log(`⏰ Автоматическая проверка (интервал ${intervalMinutes} мин)`);
@@ -649,13 +656,13 @@ async function startBot() {
 					console.error('❌ Ошибка в проверке:', err.message);
 				});
 			}, intervalMs);
-			
+
 			console.log(`✅ Периодические проверки запущены`);
 		}
 
 		// Запускаем проверки
 		startPeriodicChecks(bot);
-		
+
 		console.log('='.repeat(50) + '\n')
 
 		return bot
