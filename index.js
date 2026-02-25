@@ -8,12 +8,14 @@ import { Telegraf, Markup } from 'telegraf'
 import { socialService } from './modules/socialModule.js'
 import TwitchService from './modules/twitchModule.js'
 import { imageService } from './modules/moduleImages.js'
-import fs from 'fs'           // 👈 Добавляем для работы с файлами
-import path from 'path'       // 👈 Добавляем для работы с путями
-import { fileURLToPath } from 'url'  // 👈 Добавляем для ES modules
-import axios from 'axios'  // 👈 Обязательно добавить!
-import cron from 'node-cron'  // 👈 Проверь, что так
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
+import axios from 'axios'
+import cron from 'node-cron'
 import socialsConfig from './config/social.js'
+import { streamMessageModule } from './modules/streamMessageModule.js'
+import { updateChecker } from './modules/updateChecker.js'
 
 // =============================================
 // КОНФИГУРАЦИЯ
@@ -31,7 +33,7 @@ const config = {
 	//Настройки
 	checkInterval: process.env.CHECK_INTERVAL || '1',
 	name: 'Reizuz Stream Bot',
-	version: '0.1.3'
+	version: '0.2.3'
 }
 
 // =============================================
@@ -117,6 +119,77 @@ function createBot() {
 // КОМАНДЫ БОТА
 // =============================================
 function setupCommands(bot) {
+	// Команда для проверки обновлений
+	// Команда для проверки версии
+	bot.command('version', async (ctx) => {
+		const currentVersion = updateChecker.getCurrentVersionFromPackage();
+
+		let message = `📦 *Информация о версии*\n\n`;
+		message += `Текущая версия: \`${currentVersion}\`\n`;
+
+		try {
+			const updateInfo = await updateChecker.checkLatestVersion();
+			if (updateInfo) {
+				message += `Последняя версия: \`${updateInfo.latestVersion}\`\n`;
+				message += `Статус: ${updateInfo.hasUpdate ? '🔴 Требуется обновление' : '✅ Актуально'}\n`;
+
+				if (updateInfo.hasUpdate) {
+					message += `\nИспользуйте /update для обновления`;
+				}
+			}
+		} catch {
+			message += `\n❌ Не удалось проверить обновления`;
+		}
+
+		await ctx.reply(message, { parse_mode: 'Markdown' });
+	});
+
+	// Команда для проверки обновлений
+	bot.command('checkupdate', async (ctx) => {
+		await ctx.reply('🔄 Проверяю обновления на GitHub...');
+
+		try {
+			const updateInfo = await updateChecker.checkLatestVersion();
+
+			if (!updateInfo) {
+				await ctx.reply('❌ Не удалось проверить обновления');
+				return;
+			}
+
+			if (updateInfo.hasUpdate) {
+				const message = updateChecker.formatUpdateMessage(updateInfo);
+
+				const keyboard = Markup.inlineKeyboard([
+					[
+						Markup.button.callback('✅ Да, обновить', 'confirm_update'),
+						Markup.button.callback('❌ Нет, позже', 'cancel_update')
+					],
+					[Markup.button.url('🔗 Открыть на GitHub', updateInfo.releaseUrl)]
+				]);
+
+				await ctx.reply(message, {
+					parse_mode: 'Markdown',
+					...keyboard
+				});
+			} else {
+				await ctx.reply(`✅ У вас актуальная версия: ${updateInfo.currentVersion}`);
+			}
+		} catch (error) {
+			await ctx.reply('❌ Ошибка: ' + error.message);
+		}
+	});
+
+	// Команда для обновления
+	bot.command('update', async (ctx) => {
+		const updateInfo = await updateChecker.checkLatestVersion();
+
+		if (!updateInfo || !updateInfo.hasUpdate) {
+			await ctx.reply('✅ У вас уже актуальная версия');
+			return;
+		}
+
+		await updateChecker.performUpdate(ctx);
+	});
 
 	// Добавь в setupCommands() временную команду
 	bot.command('debug', async (ctx) => {
@@ -156,6 +229,24 @@ function setupCommands(bot) {
 			{ parse_mode: 'Markdown' }
 		)
 	})
+
+
+	// Команда для ручного обновления статистики
+	// Команда для диагностики модуля обновлений
+	bot.command('streamstatus', async (ctx) => {
+		const status = streamMessageModule.isActive ? '✅ Активен' : '❌ Неактивен';
+		const updateStatus = streamMessageModule.updateStarted ? '✅ Обновляется' : '⏳ Ожидание 10 мин';
+		const duration = streamMessageModule.getCurrentDuration();
+
+		let response = `📊 *Статус модуля обновлений*\n\n`;
+		response += `📝 Статус: ${status}\n`;
+		response += `🔄 Обновление: ${updateStatus}\n`;
+		response += `⏱ Длительность: ${duration} мин\n`;
+		response += `🔢 ID сообщения: ${streamMessageModule.messageId || 'нет'}\n`;
+		response += `📢 Чат: ${streamMessageModule.chatId || 'нет'}\n`;
+
+		await ctx.reply(response, { parse_mode: 'Markdown' });
+	});
 
 	// Команда для тестирования анонса
 	bot.command('teststream', async (ctx) => {
@@ -223,21 +314,24 @@ ${gameText}${viewersText}
 		)
 		console.log(`👤 Пользователь ${ctx.from.username} запустил бота`)
 	})
-
+	// Команда /help
 	bot.help(async (ctx) => {
 		await ctx.reply(
-			`📚 *Доступные команды*\n\n` +
-			`/start - приветствие\n` +
-			`/help - это сообщение\n` +
-			`/status - статус бота и стрима (из файла)\n` +  // 👈 ИСПРАВЛЕНО
-			`/checktwitch - принудительная проверка Twitch (реальное API)\n` +
-			`/resetstream - сброс состояния стрима\n` +
-			`/socials - статус соцсетей\n` +
-			`/image - статус картинки\n` +
-			`/reloadimage - перезагрузить картинку\n` +
-			`/test - тест отправки в канал\n` +
-			`/teststream [название] - тестовый анонс стрима\n` +
-			`/stream [название] - ручной анонс стрима`,
+			`📚 *Команды бота*\n\n` +
+			`📌 *Основные*\n` +
+			`/start • /help • /status • /version\n\n` +
+
+			`📺 *Twitch*\n` +
+			`/checktwitch • /resetstream • /streamstatus\n\n` +
+
+			`🔄 *Обновления*\n` +
+			`/checkupdate • /update\n\n` +
+
+			`📱 *Соцсети*\n` +
+			`/socials • /image • /reloadimage\n\n` +
+
+			`🧪 *Тесты*\n` +
+			`/test • /teststream • /stream • /debug`,
 			{ parse_mode: 'Markdown' }
 		)
 	})
@@ -394,6 +488,25 @@ ${gameText}${viewersText}
 	})
 }
 
+// Обработчики callback-запросов
+function setupCallbacks(bot) {
+	// Подтверждение обновления
+	bot.action('confirm_update', async (ctx) => {
+		await ctx.answerCbQuery();
+		await ctx.editMessageText('🔄 Начинаю обновление...');
+		await updateChecker.performUpdate(ctx);
+	});
+
+	// Отмена обновления
+	bot.action('cancel_update', async (ctx) => {
+		await ctx.answerCbQuery('Обновление отменено');
+		await ctx.editMessageText('❌ Обновление отменено');
+	});
+}
+
+// Вызовите эту функцию после setupCommands
+setupCallbacks(bot);
+
 // =============================================
 // ФУНКЦИЯ АВТОМАТИЧЕСКОЙ ПРОВЕРКИ
 // =============================================
@@ -424,29 +537,34 @@ async function checkStreamAndAnnounce(bot) {
 			if (imageService.hasImage()) {
 				const image = await imageService.getStreamImage(changes.streamInfo.gameName)
 				console.log('🖼 Отправляем анонс с оптимизированной картинкой')
-				console.log('🖋 Тип image:', typeof image)
-				console.log('🖋 Содержимое:', Object.keys(image || {}))
 
 				if (!image) {
 					throw new Error('Не удалось получить картинку')
 				}
 
 				try {
-					await bot.telegram.sendPhoto(
+					// Отправляем фото и ПОЛУЧАЕМ ОБЪЕКТ ОТВЕТА
+					const sentMessage = await bot.telegram.sendPhoto(
 						config.channelId,
-						image,  // 👈 ИСПОЛЬЗУЕМ СОХРАНЕННУЮ ПЕРЕМЕННУЮ!
+						image,
 						{
 							caption: announcementText,
 							parse_mode: 'Markdown',
 							reply_markup: keyboard?.reply_markup
 						}
 					)
+
 					console.log('✅ Анонс с картинкой опубликован!')
+
+					// СОХРАНЯЕМ ID СООБЩЕНИЯ И ЗАПУСКАЕМ ОБНОВЛЕНИЯ
+					streamMessageModule.setMessageInfo(config.channelId, sentMessage.message_id)
+					await streamMessageModule.startUpdating(bot, changes.streamInfo, socialService)
+
 				} catch (photoError) {
 					console.error('❌ Ошибка отправки с картинкой:', photoError.message)
 
 					// Если не получилось с картинкой, отправляем без неё
-					await bot.telegram.sendMessage(
+					const sentMessage = await bot.telegram.sendMessage(
 						config.channelId,
 						announcementText,
 						{
@@ -455,11 +573,15 @@ async function checkStreamAndAnnounce(bot) {
 						}
 					)
 					console.log('✅ Анонс без картинки опубликован (fallback)')
+
+					// СОХРАНЯЕМ ID СООБЩЕНИЯ
+					streamMessageModule.setMessageInfo(config.channelId, sentMessage.message_id)
+					await streamMessageModule.startUpdating(bot, changes.streamInfo, socialService)
 				}
 			} else {
 				console.log('⚠️ Картинка не найдена, отправляем текст')
 
-				await bot.telegram.sendMessage(
+				const sentMessage = await bot.telegram.sendMessage(
 					config.channelId,
 					announcementText,
 					{
@@ -468,11 +590,17 @@ async function checkStreamAndAnnounce(bot) {
 					}
 				)
 				console.log('✅ Анонс без картинки опубликован!')
+
+				// СОХРАНЯЕМ ID СООБЩЕНИЯ
+				streamMessageModule.setMessageInfo(config.channelId, sentMessage.message_id)
+				await streamMessageModule.startUpdating(bot, changes.streamInfo, socialService)
 			}
 		}
 
 		// Стрим закончился
 		if (changes.event === 'stream_ended') {
+			// Останавливаем обновления сообщения
+			streamMessageModule.stopUpdating()
 			if (socialsConfig.events?.streamEnd === true) {
 				console.log('📴 Стрим закончился')
 				const endText = createStreamEndText()
@@ -488,16 +616,20 @@ async function checkStreamAndAnnounce(bot) {
 				console.log('📴 Сообщение об окончании отправлено')
 			}
 
+			// Сбрасываем модуль сообщения
+			streamMessageModule.reset()
 		}
 
 		// Стрим обновился (изменилось название)
 		if (changes.event === 'stream_updated') {
+			console.log(`📝 Обновление стрима: "${changes.streamInfo.title}"`)
 
-			if (socialsConfig.events?.streamUpdate === true) {
-				console.log(`📝 Название стрима изменилось на: "${changes.streamInfo.title}"`)
-				// Можно добавить оповещение об изменении, если нужно
+			// Обновляем сообщение с новыми данными, но только если прошло 10 минут
+			if (streamMessageModule.isActive && streamMessageModule.updateStarted) {
+				await streamMessageModule.updateViewers(bot, changes.streamInfo, socialService)
+			} else if (streamMessageModule.isActive) {
+				console.log(`⏳ Обновление зрителей пропущено: еще нет 10 минут (${streamMessageModule.getCurrentDuration()} мин)`)
 			}
-
 		}
 
 	} catch (error) {
@@ -511,6 +643,7 @@ async function checkStreamAndAnnounce(bot) {
 // ЗАПУСК БОТА
 // =============================================
 async function startBot() {
+	console.log('='.repeat(50));
 	console.log('\n' + '='.repeat(50))
 	console.log('🚀 ЗАПУСК БОТА')
 	console.log('='.repeat(50))
@@ -615,6 +748,32 @@ async function startBot() {
 				throw altError
 			}
 		}
+
+		console.log('='.repeat(50));
+
+		// Просто читаем версию из package.json
+		const currentVersion = updateChecker.getCurrentVersionFromPackage();
+
+		// Проверяем обновления (опционально)
+		try {
+			const updateInfo = await updateChecker.checkLatestVersion();
+
+			if (updateInfo && updateInfo.hasUpdate) {
+				console.log('✨ =============================================== ✨');
+				console.log(`✨ ДОСТУПНО ОБНОВЛЕНИЕ: ${currentVersion} -> ${updateInfo.latestVersion}`);
+				console.log(`✨ Запустите бота и используйте команду /update`);
+				console.log('✨ =============================================== ✨');
+
+				// Сохраняем информацию для последующего использования
+				global.pendingUpdate = updateInfo;
+			} else if (updateInfo) {
+				console.log(`✅ Версия актуальна (${currentVersion})`);
+			}
+		} catch (error) {
+			console.log(`ℹ️ Текущая версия: ${currentVersion} (проверка обновлений недоступна)`);
+		}
+
+		console.log('='.repeat(50));
 
 		// =========================================
 		// ЗАПУСК ПЕРИОДИЧЕСКИХ ПРОВЕРОК
