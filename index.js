@@ -505,7 +505,6 @@ function setupCallbacks(bot) {
 }
 
 // Вызовите эту функцию после setupCommands
-setupCallbacks(bot);
 
 // =============================================
 // ФУНКЦИЯ АВТОМАТИЧЕСКОЙ ПРОВЕРКИ
